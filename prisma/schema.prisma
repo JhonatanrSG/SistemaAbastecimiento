@@ -1,0 +1,323 @@
+// prisma/schema.prisma
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/**
+ * =========================
+ * Catálogo / Recetas / Órdenes
+ * =========================
+ */
+
+model Category {
+  id       String    @id @default(cuid())
+  name     String    @unique
+  products Product[]
+  dishes   Dish[]
+}
+
+model Product {
+  id         String   @id @default(cuid())
+  name       String
+  categoryId String
+  category   Category @relation(fields: [categoryId], references: [id])
+
+  // Relaciones
+  DishRecipe        DishRecipe[]
+  Stock             Stock[]
+  StockMovement     StockMovement[]
+  SupplyRequestItem SupplyRequestItem[]
+  RfqItem           RfqItem[]
+  PurchaseOrderItem PurchaseOrderItem[]
+  grnItems          GoodsReceiptItem[]
+
+  @@index([categoryId])
+}
+
+model Dish {
+  id         String       @id @default(cuid())
+  name       String
+  categoryId String
+  category   Category     @relation(fields: [categoryId], references: [id])
+  priceCents Int
+  recipe     DishRecipe[]
+
+  // lado opuesto de OrderItem.dish (relación nombrada)
+  orderItems OrderItem[] @relation("DishOrderItems")
+
+  @@index([categoryId])
+}
+
+model DishRecipe {
+  dishId    String
+  productId String
+  qty       Float // unidades de producto por plato
+  uom       String // unidad de medida
+
+  dish    Dish    @relation(fields: [dishId], references: [id])
+  product Product @relation(fields: [productId], references: [id])
+
+  @@id([dishId, productId])
+}
+
+enum OrderStatus {
+  PENDIENTE
+  EN_PREPARACION
+  LISTO
+}
+
+model Order {
+  id          String      @id @default(cuid())
+  createdAt   DateTime    @default(now())
+  tableNumber String
+  waiterName  String
+  status      OrderStatus @default(PENDIENTE)
+  items       OrderItem[]
+}
+
+model OrderItem {
+  id      String @id @default(cuid())
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id])
+
+  dishId String
+  dish   Dish   @relation("DishOrderItems", fields: [dishId], references: [id])
+
+  qty  Int
+  note String?
+}
+
+/**
+ * =========================
+ * Inventario / Alertas
+ * =========================
+ */
+
+model Stock {
+  productId String  @id
+  qty       Float   @default(0)
+  capacity  Float   @default(0) // capacidad “lleno” por producto
+  alerted   Boolean @default(false) // para no spamear alertas
+
+  product Product @relation(fields: [productId], references: [id])
+}
+
+model StockMovement {
+  id        String   @id @default(cuid())
+  productId String
+  change    Float
+  reason    String
+  orderId   String?
+  createdAt DateTime @default(now())
+
+  product Product @relation(fields: [productId], references: [id])
+
+  @@index([productId])
+  @@index([orderId])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  type      String
+  message   String
+  // Si quieres dirigir por rol, descomenta y usa:
+  // targetRole UserRole?
+}
+
+model Request {
+  id          String        @id @default(cuid())
+  createdAt   DateTime      @default(now())
+  status      RequestStatus @default(PENDIENTE)
+  note        String?
+  items       RequestItem[]
+  createdById String?
+}
+
+/**
+ * =========================
+ * Abastecimiento (HU5..HU11)
+ * =========================
+ */
+
+enum RequestStatus {
+  PENDIENTE
+  EN_PROCESO
+  ATENDIDA
+}
+
+model RequestItem {
+  id        String  @id @default(cuid())
+  requestId String
+  request   Request @relation(fields: [requestId], references: [id])
+  productId String
+  qty       Float
+  uom       String?
+  note      String?
+}
+
+model SupplyRequest {
+  id        String        @id @default(cuid())
+  branch    String // Sucursal
+  requester String // Solicitante
+  status    RequestStatus @default(PENDIENTE)
+  createdAt DateTime      @default(now())
+
+  items         SupplyRequestItem[]
+  Rfq           Rfq[]
+  PurchaseOrder PurchaseOrder[]
+}
+
+model SupplyRequestItem {
+  id        String  @id @default(cuid())
+  requestId String
+  productId String
+  qty       Float
+  uom       String // Kg, L, Unidad...
+  brand     String? // opcional
+
+  request SupplyRequest @relation(fields: [requestId], references: [id])
+  product Product       @relation(fields: [productId], references: [id])
+
+  @@index([requestId])
+  @@index([productId])
+  @@index([brand])
+}
+
+enum RfqStatus {
+  ENVIADA
+}
+
+enum RfqClassification {
+  ENVIADA
+  RECHAZADA
+  SOSPECHOSA
+  OPCIONADA
+}
+
+model Supplier {
+  id    String @id @default(cuid())
+  name  String
+  email String @unique
+
+  rfqs          Rfq[]
+  PurchaseOrder PurchaseOrder[]
+}
+
+model Rfq {
+  id         String    @id @default(cuid())
+  requestId  String
+  supplierId String
+  dueDate    DateTime
+  status     RfqStatus @default(ENVIADA)
+  createdAt  DateTime  @default(now())
+
+  items RfqItem[]
+
+  // HU9: clasificación final tras validar vs. estándar
+  classification RfqClassification @default(ENVIADA)
+
+  request       SupplyRequest   @relation(fields: [requestId], references: [id])
+  supplier      Supplier        @relation(fields: [supplierId], references: [id])
+  PurchaseOrder PurchaseOrder[]
+
+  @@unique([requestId, supplierId]) // evita RFQ duplicada por par (request, supplier)
+}
+
+model RfqItem {
+  id        String  @id @default(cuid())
+  rfqId     String
+  productId String
+  qty       Float
+  uom       String
+  brand     String?
+
+  // HU9: precio unitario ofertado por proveedor (centavos)
+  quotedUnitPriceCents Int?
+
+  rfq     Rfq     @relation(fields: [rfqId], references: [id])
+  product Product @relation(fields: [productId], references: [id])
+
+  @@index([rfqId])
+  @@index([productId])
+}
+
+enum PoStatus {
+  EMITIDA
+  APROBADA
+  RECIBIDA
+  CANCELADA
+}
+
+model PurchaseOrder {
+  id         String   @id @default(cuid())
+  rfqId      String
+  supplierId String
+  requestId  String
+  status     PoStatus @default(EMITIDA)
+  createdAt  DateTime @default(now())
+
+  // Relaciones
+  items         PurchaseOrderItem[]
+  goodsReceipts GoodsReceipt[]
+
+  rfq      Rfq           @relation(fields: [rfqId], references: [id])
+  supplier Supplier      @relation(fields: [supplierId], references: [id])
+  request  SupplyRequest @relation(fields: [requestId], references: [id])
+
+  @@index([rfqId])
+  @@index([supplierId])
+  @@index([requestId])
+}
+
+model PurchaseOrderItem {
+  id              String         @id @default(cuid())
+  poId            String
+  productId       String
+  qty             Float
+  qtyReceived     Float          @default(0)
+  Product         Product        @relation(fields: [productId], references: [id])
+  PurchaseOrder   PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id])
+  purchaseOrderId String?
+}
+
+model GoodsReceipt {
+  id          String             @id @default(cuid())
+  createdAt   DateTime           @default(now())
+  poId        String?
+  po          PurchaseOrder?     @relation(fields: [poId], references: [id])
+  items       GoodsReceiptItem[]
+  createdById String?
+}
+
+model GoodsReceiptItem {
+  id        String       @id @default(cuid())
+  grnId     String
+  grn       GoodsReceipt @relation(fields: [grnId], references: [id])
+  productId String
+  qty       Float
+  uom       String?
+  Product   Product      @relation(fields: [productId], references: [id])
+}
+
+enum UserRole {
+  ADMIN
+  PROC
+  INVENTORY
+  WAITER
+  CHEF
+}
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         UserRole @default(WAITER)
+  createdAt    DateTime @default(now())
+}
