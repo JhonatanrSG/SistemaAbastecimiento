@@ -27,14 +27,13 @@ model Product {
   categoryId String
   category   Category @relation(fields: [categoryId], references: [id])
 
-  // Relaciones
-  DishRecipe        DishRecipe[]
-  Stock             Stock[]
-  StockMovement     StockMovement[]
-  SupplyRequestItem SupplyRequestItem[]
-  RfqItem           RfqItem[]
-  PurchaseOrderItem PurchaseOrderItem[]
-  grnItems          GoodsReceiptItem[]
+  dishRecipes        DishRecipe[]
+  stocks             Stock[]
+  stockMovements     StockMovement[]
+  supplyRequestItems SupplyRequestItem[]
+  rfqItems           RfqItem[]
+  purchaseOrderItems PurchaseOrderItem[]
+  grnItems           GoodsReceiptItem[]
 
   @@index([categoryId])
 }
@@ -81,15 +80,18 @@ model Order {
 }
 
 model OrderItem {
-  id      String @id @default(cuid())
+  id      String  @id @default(cuid())
   orderId String
-  order   Order  @relation(fields: [orderId], references: [id])
+  dishId  String
+  qty     Int
+  note    String?
 
-  dishId String
-  dish   Dish   @relation("DishOrderItems", fields: [dishId], references: [id])
+  order Order @relation(fields: [orderId], references: [id])
+  // 👇 usa el MISMO nombre de relación y especifica fields/references
+  dish  Dish  @relation("DishOrderItems", fields: [dishId], references: [id])
 
-  qty  Int
-  note String?
+  @@index([orderId])
+  @@index([dishId])
 }
 
 /**
@@ -262,7 +264,6 @@ model PurchaseOrder {
   status     PoStatus @default(EMITIDA)
   createdAt  DateTime @default(now())
 
-  // Relaciones
   items         PurchaseOrderItem[]
   goodsReceipts GoodsReceipt[]
 
@@ -276,14 +277,18 @@ model PurchaseOrder {
 }
 
 model PurchaseOrderItem {
-  id              String         @id @default(cuid())
-  poId            String
-  productId       String
-  qty             Float
-  qtyReceived     Float          @default(0)
-  Product         Product        @relation(fields: [productId], references: [id])
-  PurchaseOrder   PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id])
-  purchaseOrderId String?
+  id          String @id @default(cuid())
+  poId        String
+  productId   String
+  qty         Float
+  qtyReceived Float  @default(0)
+
+  // relaciones correctas
+  po      PurchaseOrder @relation(fields: [poId], references: [id])
+  product Product       @relation(fields: [productId], references: [id])
+
+  @@index([poId])
+  @@index([productId])
 }
 
 model GoodsReceipt {
@@ -302,7 +307,11 @@ model GoodsReceiptItem {
   productId String
   qty       Float
   uom       String?
-  Product   Product      @relation(fields: [productId], references: [id])
+
+  product Product @relation(fields: [productId], references: [id])
+
+  @@index([grnId])
+  @@index([productId])
 }
 
 enum UserRole {

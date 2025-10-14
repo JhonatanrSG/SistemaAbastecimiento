@@ -17,8 +17,8 @@ export async function POST(req: Request) {
   const ok = await bcrypt.compare(password, user.passwordHash);
   if (!ok) return NextResponse.json({ error: 'Usuario/clave inválidos' }, { status: 401 });
 
-  const token = await createToken({
-    uid: user.id,
+  const token = createToken({
+    id: user.id,                    // 👈 antes ponías uid
     role: user.role as Role,
     name: user.name,
     email: user.email,

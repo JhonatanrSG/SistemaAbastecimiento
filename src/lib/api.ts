@@ -1,39 +1,44 @@
 // src/lib/api.ts
-export async function getJSON<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, { ...init, credentials: 'include' });
-  if (!res.ok) throw new Error(await safeMsg(res));
-  return res.json() as Promise<T>;
+export async function getJSON<T = any>(path: string): Promise<T> {
+  const url = path.startsWith('http') ? path : path;
+  const res = await fetch(url, {
+    method: 'GET',
+    credentials: 'include',
+    headers: { 'Accept': 'application/json' },
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(text || `GET ${path} failed: ${res.status}`);
+  }
+  return res.json();
 }
 
-export async function postJSON<T = unknown>(url: string, body: unknown, init?: RequestInit): Promise<T> {
+export async function postJSON<T = any>(path: string, body: any): Promise<T> {
+  const url = path.startsWith('http') ? path : path;
   const res = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...(init?.headers || {}) },
-    body: JSON.stringify(body),
     credentials: 'include',
-    ...init,
+    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+    body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(await safeMsg(res));
-  return (await res.json()) as T;
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(text || `POST ${path} failed: ${res.status}`);
+  }
+  return res.json();
 }
 
-export async function patchJSON<T = unknown>(url: string, body: unknown, init?: RequestInit): Promise<T> {
+export async function patchJSON<T = any>(path: string, body?: any): Promise<T> {
+  const url = path.startsWith('http') ? path : path;
   const res = await fetch(url, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json', ...(init?.headers || {}) },
-    body: JSON.stringify(body),
     credentials: 'include',
-    ...init,
+    headers: body ? { 'Content-Type': 'application/json', 'Accept': 'application/json' } : { 'Accept': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined,
   });
-  if (!res.ok) throw new Error(await safeMsg(res));
-  return (await res.json()) as T;
-}
-
-async function safeMsg(res: Response) {
-  try {
-    const j = await res.json();
-    return j?.error ?? `${res.status} ${res.statusText}`;
-  } catch {
-    return `${res.status} ${res.statusText}`;
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(text || `PATCH ${path} failed: ${res.status}`);
   }
+  return res.json();
 }

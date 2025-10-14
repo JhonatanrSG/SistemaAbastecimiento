@@ -1,41 +1,26 @@
-/**
- * Capa de entrega Next API → Facade → Adapter(Prisma)
- * Patrones: Facade + Adapter. Prisma usa Singleton (src/lib/db.ts).
- */
+// src/app/api/dishes/route.ts
 import { NextResponse } from 'next/server';
-import { PrismaCategoryRepository } from '@/infra/db/PrismaCategoryRepository';
-import { PrismaProductRepository } from '@/infra/db/PrismaProductRepository';
-import { PrismaDishRepository } from '@/infra/db/PrismaDishRepository';
-import { CatalogFacade } from '@/core/services/CatalogFacade';
-import { DefaultDishFactory } from '@/factories/DishFactory';
+import { prisma } from '@/lib/db';
 
-export async function GET(req: Request) {
-  const { searchParams } = new URL(req.url);
-  const categoryId = searchParams.get('categoryId') ?? undefined;
+export async function GET() {
+  // Ajusta el select si quieres más campos
+  const dishes = await prisma.dish.findMany({
+    orderBy: { name: 'asc' },
+    select: {
+      id: true,
+      name: true,
+      priceCents: true,
+      category: { select: { name: true } },
+    },
+  });
 
-  const facade = new CatalogFacade(
-    new PrismaCategoryRepository(),
-    new PrismaProductRepository(),
-    new PrismaDishRepository()
-  );
-  const data = await facade.listDishes(categoryId);
-  return NextResponse.json(data);
-}
+  // Normalizamos para el front
+  const rows = dishes.map(d => ({
+    id: d.id,
+    name: d.name,
+    priceCents: d.priceCents,
+    category: d.category?.name ?? null,
+  }));
 
-export async function POST(req: Request) {
-  try {
-    const raw = await req.json();                               // entrada externa
-    const dto = new DefaultDishFactory().create(raw);           // Factory Method (validación)
-    const facade = new CatalogFacade(
-      new PrismaCategoryRepository(),
-      new PrismaProductRepository(),
-      new PrismaDishRepository()
-    );
-    const created = await facade.createDish(dto);               // Facade → Adapter → Prisma
-    return NextResponse.json(created, { status: 201 });
-  } catch (err: any) {
-    // errores comunes (validación Zod o FK)
-    const message = err?.errors?.[0]?.message || err?.message || 'Bad Request';
-    return NextResponse.json({ error: message }, { status: 400 });
-  }
+  return NextResponse.json(rows);
 }

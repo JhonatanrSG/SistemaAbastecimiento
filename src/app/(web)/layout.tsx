@@ -1,45 +1,48 @@
 // src/app/(web)/layout.tsx
-import React from 'react';
 import Link from 'next/link';
+import React from 'react';
 import { getSession, type Role } from '@/lib/auth';
 
 type MenuItem = { href: string; label: string };
 
+// Menú por rol
 const MENU_WEB: Record<Role, MenuItem[]> = {
   ADMIN: [
     { href: '/catalog', label: 'Catálogo' },
-    { href: '/suppliers', label: 'Proveedores' },
-    { href: '/requests', label: 'Solicitudes' },
-    { href: '/rfqs', label: 'RFQs' },
-    { href: '/inventory', label: 'Inventario' },
-    { href: '/pos', label: 'Órdenes de Compra' },
+    { href: '/pos', label: 'POS' },
+    { href: '/orders', label: 'Pedidos' },
     { href: '/kitchen', label: 'Cocina' },
+    { href: '/suppliers', label: 'Proveedores' },
+  ],
+  CHEF: [
+    { href: '/kitchen', label: 'Cocina' },
+    { href: '/orders', label: 'Pedidos' },
+  ],
+  INVENTORY: [
+    { href: '/catalog', label: 'Catálogo' },
+    { href: '/goods-receipts', label: 'Recepciones' },
   ],
   PROC: [
+    { href: '/requests', label: 'Solicitudes' },
     { href: '/rfqs', label: 'RFQs' },
-    { href: '/pos', label: 'Órdenes de Compra' },
+    { href: '/purchase-orders', label: 'Ordenes de Compra' },
   ],
-  INVENTORY: [{ href: '/inventory', label: 'Inventario' }],
-  WAITER: [{ href: '/catalog', label: 'Catálogo' }],
-  CHEF: [{ href: '/kitchen', label: 'Cocina' }],
+  WAITER: [
+    { href: '/pos', label: 'POS' },          // <- Tomar pedido
+    { href: '/orders', label: 'Pedidos' },   // <- Ver estados
+  ],
 };
 
-export default async function WebLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
-  // 👇 AHORA se espera la promesa
-  const session = await getSession();
+export default async function WebLayout({ children }: { children: React.ReactNode }) {
+  const session = await getSession(); // server
   const role: Role | null = session?.role ?? null;
+
   const items: MenuItem[] = role ? MENU_WEB[role] : [];
 
   return (
     <div className="min-h-dvh">
-      <header className="border-b px-6 py-3 flex gap-4 items-center">
-        <Link href="/home" className="font-semibold">
-          Admin Web
-        </Link>
+      <header className="border-b px-6 py-3 flex items-center justify-between">
+        <Link href="/home" className="font-semibold">Admin Web</Link>
         <nav className="flex gap-3 text-sm">
           {items.map((i) => (
             <Link key={i.href} href={i.href} className="hover:underline">
@@ -47,10 +50,9 @@ export default async function WebLayout({
             </Link>
           ))}
         </nav>
-        <div className="ml-auto text-sm text-gray-600">
-          {session?.name ?? ''}
-        </div>
+        <div className="text-sm text-gray-600">{role ?? 'Invitado'}</div>
       </header>
+
       <main className="p-6">{children}</main>
     </div>
   );
