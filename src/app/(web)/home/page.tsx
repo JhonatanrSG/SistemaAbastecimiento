@@ -2,62 +2,37 @@
 import Link from 'next/link';
 import { getSession, type Role } from '@/lib/auth';
 
-type MenuItem = { href: string; label: string };
+type Card = { href: string; label: string; roles: Role[] };
 
-const MENU_WEB: Record<Role, MenuItem[]> = {
-  ADMIN: [
-    { href: '/catalog', label: 'Catálogo' },
-    { href: '/pos', label: 'POS' },
-    { href: '/orders', label: 'Pedidos' },
-    { href: '/kitchen', label: 'Cocina' },
-    { href: '/suppliers', label: 'Proveedores' },
-  ],
-  CHEF: [
-    { href: '/kitchen', label: 'Cocina' },
-    { href: '/orders', label: 'Pedidos' },
-  ],
-  INVENTORY: [
-    { href: '/catalog', label: 'Catálogo' },
-    { href: '/goods-receipts', label: 'Recepciones' },
-  ],
-  PROC: [
-    { href: '/requests', label: 'Solicitudes' },
-    { href: '/rfqs', label: 'RFQs' },
-    { href: '/purchase-orders', label: 'Ordenes de Compra' },
-  ],
-  WAITER: [
-    { href: '/pos', label: 'POS' },
-    { href: '/orders', label: 'Pedidos' },
-  ],
-};
+const CARDS: Card[] = [
+  { href: '/pos',          label: 'POS',            roles: ['ADMIN','WAITER'] },
+  { href: '/orders',       label: 'Pedidos',        roles: ['ADMIN','WAITER','CHEF'] },
+  { href: '/kitchen',      label: 'Cocina',         roles: ['ADMIN','CHEF'] },
+  { href: '/dishes',       label: 'Catálogo',       roles: ['ADMIN','CHEF','WAITER','INVENTORY'] },
+  { href: '/dishes/new',   label: 'Registrar plato',roles: ['ADMIN','CHEF'] },
+];
 
 export default async function HomePage() {
   const session = await getSession();
   const role: Role | null = session?.role ?? null;
-  const items: MenuItem[] = role ? MENU_WEB[role] : [];
+
+  const visible = role ? CARDS.filter(c => c.roles.includes(role)) : [];
 
   return (
-    <div className="max-w-4xl">
-      <h1 className="text-4xl font-bold">Sistema de Abastecimiento</h1>
-      <p className="mt-2 text-gray-600">
-        Bienvenido{role ? `, ${role === 'WAITER' ? 'Mesero' : role}` : ''}.
-      </p>
+    <div className="max-w-5xl mx-auto space-y-6">
+      <h1 className="text-3xl font-bold">Sistema de Abastecimiento</h1>
+      <p>Bienvenido, {role ?? 'Invitado'}.</p>
 
-      <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 gap-4">
-        {items.map((i) => (
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {visible.map((c) => (
           <Link
-            key={i.href}
-            href={i.href}
-            className="border rounded-xl p-5 hover:shadow transition"
+            key={c.href}
+            href={c.href}
+            className="rounded-xl border p-6 hover:bg-gray-50 transition"
           >
-            {i.label}
+            {c.label}
           </Link>
         ))}
-        {items.length === 0 && (
-          <div className="text-gray-500">
-            Inicia sesión para ver tus módulos.
-          </div>
-        )}
       </div>
     </div>
   );

@@ -1,12 +1,43 @@
-// Server Component
-import { getSession, type Role } from '@/lib/auth';
-import { redirect } from 'next/navigation';
+// src/components/RoleGate.tsx
+'use client';
 
-export default async function RoleGate({ allow, children }:{
-  allow: Role[]; children: React.ReactNode;
+import { useEffect, useState } from 'react';
+import type { Role } from '@/lib/auth';
+
+export default function RoleGate({
+  allow,
+  children,
+  roleFromServer, // opcional
+}: {
+  allow: Role[];
+  children: React.ReactNode;
+  roleFromServer?: Role | null;
 }) {
-  const s = await getSession();
-  if (!s) redirect('/login');
-  if (!allow.includes(s.role)) redirect('/home');
+  // undefined = aún no sabemos; null = sin rol
+  const [role, setRole] = useState<Role | null | undefined>(roleFromServer);
+
+  useEffect(() => {
+    // Si el server ya nos dio el rol (incluido null), no hacemos fetch
+    if (roleFromServer !== undefined) return;
+
+    let alive = true;
+    (async () => {
+      try {
+        const res = await fetch('/api/me', { cache: 'no-store' });
+        const data = await res.json().catch(() => ({}));
+        if (alive) setRole((data?.role ?? null) as Role | null);
+      } catch {
+        if (alive) setRole(null);
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, [roleFromServer]);
+
+  if (role === undefined) return <div className="text-sm text-gray-500">Cargando rol…</div>;
+  if (!allow.includes(role as Role)) return <div className="text-sm text-red-600">No autorizado.</div>;
+
   return <>{children}</>;
 }

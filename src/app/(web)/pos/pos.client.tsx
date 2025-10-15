@@ -3,226 +3,297 @@
 
 import { useMemo, useState } from 'react';
 
-type Dish = {
+type DishDto = {
   id: string;
   name: string;
   priceCents: number;
-  category: string | null;
+  categoryId?: string | null;
+  category?: { id: string; name: string } | null;
 };
 
-type CartItem = { dishId: string; name: string; priceCents: number; qty: number; note?: string };
+type CategoryDto = { id: string; name: string };
 
-export default function PosClient({ dishes }: { dishes: Dish[] }) {
-  const [tableNumber, setTableNumber] = useState('');
-  const [waiterName, setWaiterName] = useState('');
-  const [query, setQuery] = useState('');
-  const [category, setCategory] = useState<string | 'ALL'>('ALL');
-  const [items, setItems] = useState<CartItem[]>([]);
-  const [sending, setSending] = useState(false);
+type CartItem = {
+  dishId: string;
+  name: string;
+  priceCents: number;
+  qty: number;
+  note?: string;
+};
 
-  const categories = useMemo(() => {
-    const set = new Set(dishes.map(d => d.category ?? 'Sin categoría'));
-    return ['ALL', ...Array.from(set)];
-  }, [dishes]);
+export default function PosClient({
+  dishes,
+  categories,
+}: {
+  dishes: DishDto[];
+  categories: CategoryDto[];
+}) {
+  // --- Estado “cabecera” del pedido ---
+  const [tableNumber, setTableNumber] = useState<string>('');
+  const [waiterName, setWaiterName] = useState<string>('');
 
+  // --- Filtros catálogo ---
+  const [search, setSearch] = useState('');
+  const [selectedCat, setSelectedCat] = useState<string>('ALL');
+
+  // --- Carrito ---
+  const [cart, setCart] = useState<CartItem[]>([]);
+  const totalCents = useMemo(
+    () => cart.reduce((acc, it) => acc + it.qty * it.priceCents, 0),
+    [cart]
+  );
+
+  // --- Catálogo filtrado ---
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return dishes.filter(d =>
-      (category === 'ALL' || (d.category ?? 'Sin categoría') === category) &&
-      (q === '' || d.name.toLowerCase().includes(q))
-    );
-  }, [dishes, query, category]);
+    let list = Array.isArray(dishes) ? dishes : [];
+    if (selectedCat !== 'ALL') {
+      list = list.filter((d) => (d.categoryId ?? d.category?.id) === selectedCat);
+    }
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      list = list.filter((d) => d.name.toLowerCase().includes(q));
+    }
+    return list;
+  }, [dishes, search, selectedCat]);
 
-  function addDish(d: Dish) {
-    setItems(curr => {
-      const idx = curr.findIndex(x => x.dishId === d.id);
+  // --- Helpers carrito ---
+  function addDish(d: DishDto) {
+    setCart((prev) => {
+      const idx = prev.findIndex((x) => x.dishId === d.id);
       if (idx >= 0) {
-        const copy = [...curr];
+        const copy = [...prev];
         copy[idx] = { ...copy[idx], qty: copy[idx].qty + 1 };
         return copy;
       }
-      return [...curr, { dishId: d.id, name: d.name, priceCents: d.priceCents, qty: 1 }];
+      return [
+        ...prev,
+        {
+          dishId: d.id,
+          name: d.name,
+          priceCents: d.priceCents,
+          qty: 1,
+          note: '',
+        },
+      ];
     });
   }
 
-  function decQty(id: string) {
-    setItems(curr =>
-      curr
-        .map(it => (it.dishId === id ? { ...it, qty: Math.max(0, it.qty - 1) } : it))
-        .filter(it => it.qty > 0)
+  function inc(dishId: string) {
+    setCart((prev) =>
+      prev.map((x) => (x.dishId === dishId ? { ...x, qty: x.qty + 1 } : x))
     );
   }
-
-  function incQty(id: string) {
-    setItems(curr => curr.map(it => (it.dishId === id ? { ...it, qty: it.qty + 1 } : it)));
+  function dec(dishId: string) {
+    setCart((prev) =>
+      prev
+        .map((x) => (x.dishId === dishId ? { ...x, qty: Math.max(1, x.qty - 1) } : x))
+        .filter((x) => x.qty > 0)
+    );
+  }
+  function removeItem(dishId: string) {
+    setCart((prev) => prev.filter((x) => x.dishId !== dishId));
+  }
+  function setNote(dishId: string, note: string) {
+    setCart((prev) => prev.map((x) => (x.dishId === dishId ? { ...x, note } : x)));
   }
 
-  function removeItem(id: string) {
-    setItems(curr => curr.filter(it => it.dishId !== id));
-  }
-
-  const totalCents = useMemo(
-    () => items.reduce((acc, it) => acc + it.qty * (it.priceCents ?? 0), 0),
-    [items]
-  );
-
+  // --- Enviar pedido ---
+  const [submitting, setSubmitting] = useState(false);
   async function submit() {
+    if (!tableNumber.trim()) {
+      alert('Debes ingresar la mesa');
+      return;
+    }
+    if (cart.length === 0) {
+      alert('Agrega al menos un plato');
+      return;
+    }
+    setSubmitting(true);
     try {
-      if (!tableNumber) return alert('Ingresa la mesa.');
-      if (items.length === 0) return alert('Agrega al menos un plato.');
-      setSending(true);
-
-      // Construimos payload para /api/orders
       const payload = {
-        tableNumber,
-        waiterName,
-        items: items.map(it => ({ dishId: it.dishId, qty: it.qty, note: it.note ?? undefined })),
+        tableNumber: tableNumber.trim(),
+        waiterName: waiterName.trim() || undefined,
+        items: cart.map((c) => ({
+          dishId: c.dishId,
+          qty: c.qty,
+          note: c.note?.trim() || undefined,
+        })),
       };
-
       const res = await fetch('/api/orders', {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json?.error || 'No se pudo crear el pedido');
-
-      alert('¡Pedido creado!');
-      // limpiar
-      setItems([]);
-      setTableNumber('');
-      // Tip: si quieres mantener el mesero por conveniencia, no lo limpies
-      // setWaiterName('');
+      if (!res.ok) {
+        const txt = await res.text().catch(() => '');
+        throw new Error(`Error creando pedido: ${res.status} ${txt}`);
+      }
+      const data = await res.json();
+      // Éxito → limpiar carrito / mantener cabecera si quieres
+      setCart([]);
+      alert('✅ Pedido creado');
+      // Opcional: navegar a /orders o refrescar
+      // window.location.href = '/orders';
     } catch (e: any) {
-      alert(e.message || 'Error');
+      alert(e?.message ?? 'Error creando pedido');
     } finally {
-      setSending(false);
+      setSubmitting(false);
     }
   }
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-      {/* Columna izquierda: filtros + platos */}
-      <div className="lg:col-span-2 space-y-4">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <label className="space-y-1 md:col-span-1">
-            <span className="text-sm text-gray-600">Mesa</span>
+    <div className="grid grid-cols-1 md:grid-cols-[1fr_380px] gap-6">
+      {/* Columna izquierda: catálogo */}
+      <div className="space-y-4">
+        {/* Cabecera Pedido */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label className="text-sm text-gray-600">Mesa</label>
             <input
-              className="w-full border rounded px-3 py-2"
+              className="w-full mt-1 rounded border px-3 py-2"
+              placeholder="Número de mesa"
               value={tableNumber}
-              onChange={e => setTableNumber(e.target.value)}
-              placeholder="Ej: 12"
+              onChange={(e) => setTableNumber(e.target.value)}
             />
-          </label>
-
-          <label className="space-y-1 md:col-span-2">
-            <span className="text-sm text-gray-600">Mesero (opcional)</span>
+          </div>
+          <div>
+            <label className="text-sm text-gray-600">Mesero (opcional)</label>
             <input
-              className="w-full border rounded px-3 py-2"
+              className="w-full mt-1 rounded border px-3 py-2"
+              placeholder="Nombre"
               value={waiterName}
-              onChange={e => setWaiterName(e.target.value)}
-              placeholder="Ej: Daniel"
+              onChange={(e) => setWaiterName(e.target.value)}
             />
-          </label>
+          </div>
         </div>
 
-        <div className="flex flex-wrap gap-3 items-center">
+        {/* Filtros */}
+        <div className="flex flex-col sm:flex-row gap-3">
           <input
-            className="border rounded px-3 py-2 flex-1 min-w-[240px]"
+            className="flex-1 rounded border px-3 py-2"
             placeholder="Buscar plato…"
-            value={query}
-            onChange={e => setQuery(e.target.value)}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
           />
           <select
-            className="border rounded px-3 py-2"
-            value={category}
-            onChange={e => setCategory(e.target.value as any)}
+            className="w-full sm:w-60 rounded border px-3 py-2"
+            value={selectedCat}
+            onChange={(e) => setSelectedCat(e.target.value)}
           >
-            {categories.map(c => (
-              <option key={c} value={c}>
-                {c === 'ALL' ? 'Todas las categorías' : c}
+            <option value="ALL">Todas las categorías</option>
+            {categories.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
               </option>
             ))}
           </select>
         </div>
 
-        {/* Grid de platos */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-          {filtered.map(d => (
-            <button
-              key={d.id}
-              onClick={() => addDish(d)}
-              className="border rounded-lg p-4 text-left hover:bg-gray-50"
-              title="Agregar al pedido"
-            >
-              <div className="font-semibold">{d.name}</div>
-              <div className="text-xs text-gray-500">{d.category ?? 'Sin categoría'}</div>
-              <div className="mt-2 text-sm">
-                {(d.priceCents / 100).toLocaleString(undefined, { style: 'currency', currency: 'USD' })}
+        {/* Tarjetas de platos */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {filtered.map((d) => (
+            <div key={d.id} className="rounded-lg border p-4 flex flex-col justify-between">
+              <div>
+                <div className="font-semibold">{d.name}</div>
+                <div className="text-sm text-gray-500">
+                  {d.category?.name ?? '—'}
+                </div>
               </div>
-              <div className="mt-3 inline-block text-xs px-2 py-1 border rounded">Agregar</div>
-            </button>
+              <div className="mt-3 flex items-center justify-between">
+                <div className="font-medium">
+                  {(d.priceCents / 100).toLocaleString('es-CO', {
+                    style: 'currency',
+                    currency: 'COP',
+                    maximumFractionDigits: 0,
+                  })}
+                </div>
+                <button
+                  className="rounded bg-black text-white px-3 py-1"
+                  onClick={() => addDish(d)}
+                >
+                  Agregar
+                </button>
+              </div>
+            </div>
           ))}
           {filtered.length === 0 && (
-            <div className="text-sm text-gray-500">No hay platos que coincidan.</div>
+            <div className="col-span-full text-center text-gray-500">
+              No hay platos para mostrar.
+            </div>
           )}
         </div>
       </div>
 
       {/* Columna derecha: carrito */}
-      <div className="space-y-4">
-        <div className="text-lg font-semibold">Pedido actual</div>
+      <div className="rounded-lg border p-4 space-y-4 h-max sticky top-6">
+        <h2 className="font-semibold text-lg">Pedido actual</h2>
 
-        <div className="border rounded-lg divide-y">
-          {items.length === 0 ? (
-            <div className="p-4 text-sm text-gray-500">Aún no has agregado platos.</div>
-          ) : (
-            items.map(it => (
-              <div key={it.dishId} className="p-3 flex items-start gap-3">
-                <div className="flex-1">
-                  <div className="font-medium">{it.name}</div>
-                  <div className="text-xs text-gray-500">
-                    {(it.priceCents / 100).toLocaleString(undefined, { style: 'currency', currency: 'USD' })}
-                  </div>
-                  <textarea
-                    placeholder="Nota (opcional)"
-                    className="mt-2 w-full border rounded px-2 py-1 text-sm"
-                    value={it.note ?? ''}
-                    onChange={e =>
-                      setItems(curr =>
-                        curr.map(x => (x.dishId === it.dishId ? { ...x, note: e.target.value } : x))
-                      )
-                    }
-                  />
-                </div>
+        {cart.length === 0 && (
+          <div className="text-gray-500">Aún no has agregado platos.</div>
+        )}
 
-                <div className="flex items-center gap-2">
-                  <button className="px-2 py-1 border rounded" onClick={() => decQty(it.dishId)}>-</button>
-                  <div className="w-8 text-center">{it.qty}</div>
-                  <button className="px-2 py-1 border rounded" onClick={() => incQty(it.dishId)}>+</button>
-                </div>
+        {cart.map((it) => (
+          <div key={it.dishId} className="rounded border p-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="font-medium">{it.name}</div>
+              <button
+                className="text-sm text-red-600"
+                onClick={() => removeItem(it.dishId)}
+              >
+                Quitar
+              </button>
+            </div>
 
-                <button className="text-xs text-red-600" onClick={() => removeItem(it.dishId)}>
-                  Quitar
-                </button>
-              </div>
-            ))
-          )}
-        </div>
+            <div className="text-sm text-gray-600">
+              {(it.priceCents / 100).toLocaleString('es-CO', {
+                style: 'currency',
+                currency: 'COP',
+                maximumFractionDigits: 0,
+              })}
+            </div>
 
-        <div className="flex justify-between text-sm">
-          <div>Total</div>
+            <div className="flex items-center gap-2">
+              <button
+                className="rounded border px-2"
+                onClick={() => dec(it.dishId)}
+              >
+                −
+              </button>
+              <div className="w-8 text-center">{it.qty}</div>
+              <button
+                className="rounded border px-2"
+                onClick={() => inc(it.dishId)}
+              >
+                +
+              </button>
+            </div>
+
+            <textarea
+              placeholder="Nota (opcional)"
+              className="w-full rounded border px-2 py-1 text-sm"
+              value={it.note ?? ''}
+              onChange={(e) => setNote(it.dishId, e.target.value)}
+            />
+          </div>
+        ))}
+
+        <div className="flex items-center justify-between border-t pt-3">
+          <div className="text-gray-600">Total</div>
           <div className="font-semibold">
-            {(totalCents / 100).toLocaleString(undefined, { style: 'currency', currency: 'USD' })}
+            {(totalCents / 100).toLocaleString('es-CO', {
+              style: 'currency',
+              currency: 'COP',
+              maximumFractionDigits: 0,
+            })}
           </div>
         </div>
 
         <button
+          className="w-full rounded bg-black text-white py-3 disabled:opacity-60"
           onClick={submit}
-          disabled={sending || !tableNumber || items.length === 0}
-          className="w-full px-4 py-2 rounded bg-black text-white disabled:opacity-50"
+          disabled={submitting || cart.length === 0}
         >
-          {sending ? 'Enviando…' : 'Crear pedido'}
+          {submitting ? 'Enviando…' : 'Crear pedido'}
         </button>
       </div>
     </div>
